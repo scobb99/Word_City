@@ -1,0 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* small helpers */
+* { box-sizing: border-box; }
+button:disabled { opacity: 0.6; cursor: not-allowed; }
