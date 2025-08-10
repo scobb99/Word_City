@@ -2,6 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
-/* small helpers */
+/* ---- Cozy fantasy tile styles ---- */
+:root{
+  --meadow:#9ecb97;    /* soft greens */
+  --forest:#8ab886;
+  --hill:#a6c49f;
+  --marsh:#8bb5a2;
+  --thicket:#6a9367;
+  --water1:#78b7e6;    /* watercolor blues */
+  --water2:#3f8ac8;
+  --road:#6b5743;      /* warm brown */
+  --road-stone:#8e7760;
+  --bridge:#8a6a4f;
+  --bridge-plank:#b48e6e;
+}
+
+/* Each tile is a rounded blob with a subtle inner shadow for the storybook look */
+.tile {
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.6);
+  box-shadow: inset 0 0 0.5px rgba(0,0,0,0.25);
+}
+
+/* Biomes (underlay tint) */
+.biome-meadow   { background: var(--meadow); }
+.biome-forest   { background: radial-gradient(120% 80% at 20% 20%, #4d7a4f55 8%, transparent 30%) , var(--forest); }
+.biome-hill     { background: radial-gradient(120% 80% at 70% 70%, #7f8b7b66 8%, transparent 32%), var(--hill); }
+.biome-marsh    { background: radial-gradient(120% 80% at 35% 60%, #5a978577 10%, transparent 35%), var(--marsh); }
+.biome-thicket  { background: repeating-radial-gradient(circle at 40% 45%, #2e5c3270 0 3px, transparent 4px 9px), var(--thicket); }
+
+/* Terrain (overlay) */
+.terrain-water {
+  background:
+    radial-gradient(120% 80% at 30% 30%, #ffffff12 0 40%, transparent 41%),
+    repeating-linear-gradient( to right, transparent 0 18px, #ffffff1a 18px 19px),
+    linear-gradient(180deg, var(--water1), var(--water2));
+}
+.terrain-road {
+  background:
+    repeating-linear-gradient( to bottom, var(--road-stone) 0 3px, transparent 3px 12px),
+    var(--road);
+}
+.terrain-bridge {
+  background:
+    repeating-linear-gradient( to bottom, var(--bridge-plank) 0 2px, #00000022 2px 4px ),
+    var(--bridge);
+}
+
+/* Impassable hint */
+.thicket-ring { box-shadow: inset 0 0 0 2px rgba(0,0,0,0.25); }
+
+/* Small helpers */
 * { box-sizing: border-box; }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
