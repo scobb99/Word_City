@@ -26,17 +26,20 @@ const CATALOG: Building[] = [
 ];
 
 // ——— Word list loader ———
-const FALLBACK = ["STONE","MAGIC","CLOUD","MYSTIC","GARDEN","COTTAGE","RIVER","LIBRARY","MARKET","BRIDGE"];
+const WORD_LIST_PATH = "/words-enable.txt"; // add this near the top
+
 async function loadWords(): Promise<Set<string>> {
   try {
-    const res = await fetch(WORD_LIST_PATH, { cache: 'no-store' });
-    if (!res.ok) throw new Error('no list');
+    const res = await fetch(WORD_LIST_PATH);
+    if (!res.ok) throw new Error("No words file");
     const text = await res.text();
-    return new Set(text.split(/\r?\n/).map(w=>w.trim().toUpperCase()).filter(Boolean));
+    const words = text.split(/\r?\n/).map(w=>w.trim().toUpperCase()).filter(w=>/^[A-Z]{3,}$/.test(w));
+    return new Set(words);
   } catch {
-    return new Set(FALLBACK);
+    return new Set(["STONE","MAGIC","GARDEN","BRIDGE","LIBRARY"]); // fallback
   }
 }
+
 
 // ——— Map generation (same as before, trimmed) ———
 function makeRNG(seedNum: number) { let s = seedNum >>> 0; return function rand() { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
