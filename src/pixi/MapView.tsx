@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Application, Container, Graphics, Texture, Sprite, RenderTexture } from 'pixi.js';
 import { grassG, forestG, hillG, marshG, thicketG, waterG, roadG, bridgeG } from './textures';
 
@@ -7,8 +7,8 @@ type Tile = { terrain: 'grass'|'water'|'road'|'bridge'; biome: Biome; structure?
 
 type Props = {
   tiles: Tile[];
-  size: number;            // grid dimension (e.g., 54)
-  tileSize?: number;       // pixel size of a tile (world scale), e.g., 28
+  size: number;
+  tileSize?: number;
   ghost?: number[]|null;
   onClick?(idx:number): void;
   onDrag?(idx:number): void;
@@ -20,8 +20,9 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
   const layersRef = useRef<{base:Container; roads:Container; structs:Container; ghost:Container}|null>(null);
   const texRef = useRef<{[k:string]:Texture}|null>(null);
   const dragging = useRef<{down:boolean; lx:number; ly:number}>({ down:false, lx:0, ly:0 });
+  const [readyBump, setReadyBump] = useState(0); // triggers redraw after textures are built
 
-  // mount app (Pixi v8) and keep canvas sized to host
+  // mount app (Pixi v8) and resize to the host
   useEffect(() => {
     let app: Application | null = null;
     let cancelled = false;
@@ -30,12 +31,7 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
     (async () => {
       const host = hostRef.current!;
       app = new Application();
-      await app.init({
-        backgroundAlpha: 0,
-        antialias: true,
-        // start with something; we immediately resize to host below
-        width: 300, height: 300,
-      });
+      await app.init({ backgroundAlpha: 0, antialias: true, width: 300, height: 300 });
       if (cancelled) { app.destroy(true); return; }
 
       appRef.current = app;
@@ -47,10 +43,9 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
       world.addChild(base, roads, structs, ghostL);
       app.stage.addChild(world);
 
-      // ----- pan & zoom -----
-      let scale = 1;
+      // Drag to pan
       world.on('pointerdown', (e:any) => { dragging.current.down = true; dragging.current.lx = e.global.x; dragging.current.ly = e.global.y; });
-      world.on('pointerup',   () => { dragging.current.down = false; });
+      world.on('pointerup', () => { dragging.current.down = false; });
       world.on('pointerupoutside', () => { dragging.current.down = false; });
       world.on('globalpointermove', (e:any) => {
         if (!dragging.current.down) return;
@@ -59,13 +54,16 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
         world.x += dx; world.y += dy;
         dragging.current.lx = e.global.x; dragging.current.ly = e.global.y;
       });
+
+      // Wheel to zoom
+      let scale = 1;
       app.canvas.addEventListener('wheel', (ev: WheelEvent) => {
         const delta = Math.sign(ev.deltaY) * -0.1;
         scale = Math.min(2.5, Math.max(0.5, scale + delta));
         world.scale.set(scale);
       }, { passive: true });
 
-      // clicks -> tile index
+      // Tile clicks / drags
       world.on('pointertap', (e:any) => {
         const p = world.toLocal(e.global);
         const x = Math.floor(p.x / tileSize), y = Math.floor(p.y / tileSize);
@@ -80,11 +78,32 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
 
       layersRef.current = { base, roads, structs, ghost: ghostL };
 
-      // ----- keep renderer the same size as the host div -----
+      // Build textures NOW that the app exists, then trigger a redraw
+      if (!texRef.current) {
+        const make = (gf: (size?: number) => Graphics) => {
+          const g = gf(tileSize);
+          const rt = RenderTexture.create({ width: tileSize, height: tileSize });
+          app!.renderer.render(g, { renderTexture: rt });
+          g.destroy(true);
+          return rt as Texture;
+        };
+        texRef.current = {
+          meadow: make(grassG),
+          forest: make(forestG),
+          hill:   make(hillG),
+          marsh:  make(marshG),
+          thicket:make(thicketG),
+          water:  make(waterG),
+          road:   make(roadG),
+          bridge: make(bridgeG),
+        };
+        setReadyBump(v => v + 1); // cause the draw effect to run
+      }
+
+      // Keep canvas sized to host
       const fit = () => {
         const w = host.clientWidth || 300;
         const h = host.clientHeight || 300;
-        // v8 resize signature
         (app!.renderer as any).resize?.({ width: w, height: h }) ?? (app!.renderer as any).resize?.(w, h);
       };
       fit();
@@ -93,7 +112,6 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
     })();
 
     return () => {
-      cancelled = true;
       ro?.disconnect();
       appRef.current?.destroy(true);
       appRef.current = null;
@@ -102,32 +120,7 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
     };
   }, [size, tileSize, onClick, onDrag]);
 
-  // build textures once from Graphics factories
-  useEffect(() => {
-    const app = appRef.current;
-    if (!app || texRef.current) return;
-
-    const make = (gf: (size?: number) => Graphics) => {
-      const g = gf(tileSize);
-      const rt = RenderTexture.create({ width: tileSize, height: tileSize });
-      app.renderer.render(g, { renderTexture: rt });
-      g.destroy(true);
-      return rt as Texture;
-    };
-
-    texRef.current = {
-      meadow: make(grassG),
-      forest: make(forestG),
-      hill:   make(hillG),
-      marsh:  make(marshG),
-      thicket:make(thicketG),
-      water:  make(waterG),
-      road:   make(roadG),
-      bridge: make(bridgeG),
-    };
-  }, [tileSize]);
-
-  // redraw contents whenever tiles change
+  // (Re)draw whenever tiles change or textures just became ready
   useEffect(() => {
     if (!appRef.current || !layersRef.current || !texRef.current) return;
     const { base, roads, structs, ghost: ghostL } = layersRef.current;
@@ -138,8 +131,7 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
       const t = tiles[i];
       const x = (i % size) * tileSize, y = Math.floor(i/size) * tileSize;
 
-      const biomeTex = T[t.biome] || T.meadow;
-      const s = new Sprite(biomeTex); s.x = x; s.y = y; base.addChild(s);
+      const bg = new Sprite(T[t.biome] || T.meadow); bg.x = x; bg.y = y; base.addChild(bg);
 
       if (t.terrain === 'water')      { const w = new Sprite(T.water);  w.x=x; w.y=y; base.addChild(w); }
       else if (t.terrain === 'road')  { const r = new Sprite(T.road);   r.x=x; r.y=y; roads.addChild(r); }
@@ -163,8 +155,7 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
         ghostL.addChild(g);
       });
     }
-  }, [tiles, size, tileSize, ghost]);
+  }, [tiles, size, tileSize, ghost, readyBump]);
 
-  // host fills its parent; parent sets the height
   return <div ref={hostRef} style={{ width: '100%', height: '100%' }} />;
 }
