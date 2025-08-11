@@ -22,12 +22,37 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
   const dragging = useRef<{down:boolean; lx:number; ly:number}>({ down:false, lx:0, ly:0 });
 
   // mount app
-  useEffect(() => {
-    const host = hostRef.current!;
-    const app = new Application({ backgroundAlpha: 0, antialias: true, width: size*tileSize+2, height: size*tileSize+2 });
-    appRef.current = app;
-    host.innerHTML = '';
-    host.appendChild(app.view as any);
+// ensure textures exist and are rendered to RTs once
+useEffect(() => {
+  if (!appRef.current) return;
+  const app = appRef.current;
+  if (!texRef.current) {
+    const { RenderTexture, Texture } = await import('pixi.js'); // lazy type import if needed
+
+    const make = (gf: (size?: number) => import('./textures').then(m => m.GFactory) | any, size = tileSize) => {
+      // gf here is one of our *GFactory* functions (returns Graphics)
+      const g = (gf as any)(size);
+      const rt = RenderTexture.create({ width: size, height: size });
+      app.renderer.render(g, { renderTexture: rt });
+      g.destroy();
+      return rt as Texture;
+    };
+
+    // import factories
+    const tex = await import('./textures');
+    texRef.current = {
+      meadow: make(tex.grassG),
+      forest: make(tex.forestG),
+      hill:   make(tex.hillG),
+      marsh:  make(tex.marshG),
+      thicket:make(tex.thicketG),
+      water:  make(tex.waterG),
+      road:   make(tex.roadG),
+      bridge: make(tex.bridgeG),
+    };
+  }
+}, [tileSize]);
+
 
     // layers
     const world = new Container(); world.eventMode = 'static';
@@ -85,7 +110,7 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
         return rt as Texture;
       };
       texRef.current = {
-        meadow: make('meadow', ()=>{ const g = new Graphics(); g = grassTexture(tileSize) as unknown as Graphics; return g; }),
+        meadow: make('meadow', ()=>{ return g; }),
         forest: make('forest', ()=> forestTexture(tileSize) as unknown as Graphics),
         hill: make('hill', ()=> hillTexture(tileSize) as unknown as Graphics),
         marsh: make('marsh', ()=> marshTexture(tileSize) as unknown as Graphics),
