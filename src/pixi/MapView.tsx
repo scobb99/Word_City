@@ -1,5 +1,3 @@
-// MAPVIEW VERSION: v2
-
 import React, { useEffect, useRef } from 'react';
 import { Application, Container, Graphics, Texture, Sprite, RenderTexture } from 'pixi.js';
 import { grassG, forestG, hillG, marshG, thicketG, waterG, roadG, bridgeG } from './textures';
@@ -23,54 +21,80 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
   const texRef = useRef<{[k:string]:Texture}|null>(null);
   const dragging = useRef<{down:boolean; lx:number; ly:number}>({ down:false, lx:0, ly:0 });
 
+  // mount app (Pixi v8 style)
   useEffect(() => {
-    const host = hostRef.current!;
-    const app = new Application({ backgroundAlpha: 0, antialias: true, width: size*tileSize+2, height: size*tileSize+2 });
-    appRef.current = app;
-    host.innerHTML = '';
-    host.appendChild(app.view as any);
+    let app: Application | null = null;
+    let cancelled = false;
 
-    const world = new Container(); world.eventMode = 'static';
-    const base = new Container(); const roads = new Container(); const structs = new Container(); const ghostL = new Container();
-    world.addChild(base, roads, structs, ghostL);
-    app.stage.addChild(world);
+    (async () => {
+      const host = hostRef.current!;
+      // v8: construct, then init
+      app = new Application();
+      await app.init({
+        backgroundAlpha: 0,
+        antialias: true,
+        width: size * tileSize + 2,
+        height: size * tileSize + 2,
+      });
+      if (cancelled) { app.destroy(true); return; }
 
-    let scale = 1;
-    world.on('pointerdown', (e:any) => { dragging.current.down = true; dragging.current.lx = e.global.x; dragging.current.ly = e.global.y; });
-    world.on('pointerup', ()=> dragging.current.down = false);
-    world.on('pointerupoutside', ()=> dragging.current.down = false);
-    world.on('globalpointermove', (e:any) => {
-      if (!dragging.current.down) return;
-      const dx = e.global.x - dragging.current.lx;
-      const dy = e.global.y - dragging.current.ly;
-      world.x += dx; world.y += dy;
-      dragging.current.lx = e.global.x; dragging.current.ly = e.global.y;
-    });
-    (app.view as any).addEventListener('wheel', (ev:WheelEvent) => {
-      const delta = Math.sign(ev.deltaY)*-0.1;
-      scale = Math.min(2.5, Math.max(0.5, scale + delta));
-      world.scale.set(scale);
-    }, { passive: true });
+      appRef.current = app;
+      host.innerHTML = '';
+      // v8: use canvas (not view)
+      host.appendChild(app.canvas);
 
-    world.on('pointertap', (e:any) => {
-      const p = world.toLocal(e.global);
-      const x = Math.floor(p.x / tileSize), y = Math.floor(p.y / tileSize);
-      if (x>=0 && y>=0 && x<size && y<size) onClick?.(y*size + x);
-    });
-    world.on('pointermove', (e:any) => {
-      if (!onDrag || !dragging.current.down) return;
-      const p = world.toLocal(e.global);
-      const x = Math.floor(p.x / tileSize), y = Math.floor(p.y / tileSize);
-      if (x>=0 && y>=0 && x<size && y<size) onDrag(y*size + x);
-    });
+      const world = new Container(); world.eventMode = 'static';
+      const base = new Container(); const roads = new Container(); const structs = new Container(); const ghostL = new Container();
+      world.addChild(base, roads, structs, ghostL);
+      app.stage.addChild(world);
 
-    layersRef.current = { base, roads, structs, ghost: ghostL };
-    return () => { app.destroy(true); appRef.current = null; };
+      let scale = 1;
+      world.on('pointerdown', (e:any) => { dragging.current.down = true; dragging.current.lx = e.global.x; dragging.current.ly = e.global.y; });
+      world.on('pointerup',   ()    => { dragging.current.down = false; });
+      world.on('pointerupoutside',  () => { dragging.current.down = false; });
+      world.on('globalpointermove', (e:any) => {
+        if (!dragging.current.down) return;
+        const dx = e.global.x - dragging.current.lx;
+        const dy = e.global.y - dragging.current.ly;
+        world.x += dx; world.y += dy;
+        dragging.current.lx = e.global.x; dragging.current.ly = e.global.y;
+      });
+
+      // attach wheel to the canvas
+      app.canvas.addEventListener('wheel', (ev: WheelEvent) => {
+        const delta = Math.sign(ev.deltaY) * -0.1;
+        scale = Math.min(2.5, Math.max(0.5, scale + delta));
+        world.scale.set(scale);
+      }, { passive: true });
+
+      world.on('pointertap', (e:any) => {
+        const p = world.toLocal(e.global);
+        const x = Math.floor(p.x / tileSize), y = Math.floor(p.y / tileSize);
+        if (x>=0 && y>=0 && x<size && y<size) onClick?.(y*size + x);
+      });
+      world.on('pointermove', (e:any) => {
+        if (!onDrag || !dragging.current.down) return;
+        const p = world.toLocal(e.global);
+        const x = Math.floor(p.x / tileSize), y = Math.floor(p.y / tileSize);
+        if (x>=0 && y>=0 && x<size && y<size) onDrag(y*size + x);
+      });
+
+      layersRef.current = { base, roads, structs, ghost: ghostL };
+    })();
+
+    return () => {
+      cancelled = true;
+      appRef.current?.destroy(true);
+      appRef.current = null;
+      layersRef.current = null;
+      texRef.current = null;
+    };
   }, [size, tileSize, onClick, onDrag]);
 
+  // build textures once from Graphics factories
   useEffect(() => {
-    if (!appRef.current || texRef.current) return;
     const app = appRef.current;
+    if (!app || texRef.current) return;
 
     const make = (gf: (size?: number) => Graphics) => {
       const g = gf(tileSize);
@@ -92,6 +116,7 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
     };
   }, [tileSize]);
 
+  // redraw
   useEffect(() => {
     if (!appRef.current || !layersRef.current || !texRef.current) return;
     const { base, roads, structs, ghost: ghostL } = layersRef.current;
@@ -117,8 +142,8 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
         if (t.structure.id.includes('market')) g.fill({ color: 0xc7772e });
         if (t.structure.id.includes('library')) g.fill({ color: 0x6a7bb6 });
         if (t.structure.id.includes('cottage')) g.fill({ color: 0xcf8c7c });
-        if (t.structure.id.includes('quarry')) g.fill({ color: 0x8f8f8f });
-        if (t.structure.id.includes('sawmill')) g.fill({ color: 0x8f6b4a });
+        if (t.structure.id.includes('quarry'))  g.fill({ color: 0x8f8f8f });
+        if (t.structure.id.includes('sawmill'))  g.fill({ color: 0x8f6b4a });
         structs.addChild(g);
       }
     }
