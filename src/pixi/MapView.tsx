@@ -1,3 +1,5 @@
+// MAPVIEW VERSION: v2
+
 import React, { useEffect, useRef } from 'react';
 import { Application, Container, Graphics, Texture, Sprite, RenderTexture } from 'pixi.js';
 import { grassG, forestG, hillG, marshG, thicketG, waterG, roadG, bridgeG } from './textures';
