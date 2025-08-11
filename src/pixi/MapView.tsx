@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Application, Container, Graphics, Texture, Sprite, RenderTexture } from 'pixi.js';
-import { grassTexture, forestTexture, hillTexture, marshTexture, thicketTexture, waterTexture, roadTexture, bridgeTexture } from './textures';
+import { grassG, forestG, hillG, marshG, thicketG, waterG, roadG, bridgeG } from './textures';
 
 type Biome = 'meadow'|'forest'|'hill'|'marsh'|'thicket';
 type Tile = { terrain: 'grass'|'water'|'road'|'bridge'; biome: Biome; structure?: { id:string; level:number; icon:string; shape?:Array<[number,number]> } };
@@ -22,45 +22,18 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
   const dragging = useRef<{down:boolean; lx:number; ly:number}>({ down:false, lx:0, ly:0 });
 
   // mount app
-// ensure textures exist and are rendered to RTs once
-useEffect(() => {
-  if (!appRef.current) return;
-  const app = appRef.current;
-  if (!texRef.current) {
-    const { RenderTexture, Texture } = await import('pixi.js'); // lazy type import if needed
+  useEffect(() => {
+    const host = hostRef.current!;
+    const app = new Application({ backgroundAlpha: 0, antialias: true, width: size*tileSize+2, height: size*tileSize+2 });
+    appRef.current = app;
+    host.innerHTML = '';
+    host.appendChild(app.view as any);
 
-    const make = (gf: (size?: number) => import('./textures').then(m => m.GFactory) | any, size = tileSize) => {
-      // gf here is one of our *GFactory* functions (returns Graphics)
-      const g = (gf as any)(size);
-      const rt = RenderTexture.create({ width: size, height: size });
-      app.renderer.render(g, { renderTexture: rt });
-      g.destroy();
-      return rt as Texture;
-    };
-
-    // import factories
-    const tex = await import('./textures');
-    texRef.current = {
-      meadow: make(tex.grassG),
-      forest: make(tex.forestG),
-      hill:   make(tex.hillG),
-      marsh:  make(tex.marshG),
-      thicket:make(tex.thicketG),
-      water:  make(tex.waterG),
-      road:   make(tex.roadG),
-      bridge: make(tex.bridgeG),
-    };
-  }
-}, [tileSize]);
-
-
-    // layers
     const world = new Container(); world.eventMode = 'static';
     const base = new Container(); const roads = new Container(); const structs = new Container(); const ghostL = new Container();
     world.addChild(base, roads, structs, ghostL);
     app.stage.addChild(world);
 
-    // panning + zoom
     let scale = 1;
     world.on('pointerdown', (e:any) => { dragging.current.down = true; dragging.current.lx = e.global.x; dragging.current.ly = e.global.y; });
     world.on('pointerup', ()=> dragging.current.down = false);
@@ -78,7 +51,6 @@ useEffect(() => {
       world.scale.set(scale);
     }, { passive: true });
 
-    // tile pointer handling
     world.on('pointertap', (e:any) => {
       const p = world.toLocal(e.global);
       const x = Math.floor(p.x / tileSize), y = Math.floor(p.y / tileSize);
@@ -95,41 +67,38 @@ useEffect(() => {
     return () => { app.destroy(true); appRef.current = null; };
   }, [size, tileSize, onClick, onDrag]);
 
-  // ensure textures exist and are rendered to RTs once
+  // build textures once from Graphics factories
   useEffect(() => {
-    if (!appRef.current) return;
+    if (!appRef.current || texRef.current) return;
     const app = appRef.current;
-    if (!texRef.current) {
-      // draw each Graphics into a render texture once
-      const make = (name:string, gFactory:()=>Graphics) => {
-        const g = gFactory();
-        const w = Math.ceil(g.width||tileSize), h = Math.ceil(g.height||tileSize);
-        const rt = RenderTexture.create({ width: w, height: h });
-        app.renderer.render(g, { renderTexture: rt });
-        g.destroy();
-        return rt as Texture;
-      };
-      texRef.current = {
-        meadow: make('meadow', ()=>{ return g; }),
-        forest: make('forest', ()=> forestTexture(tileSize) as unknown as Graphics),
-        hill: make('hill', ()=> hillTexture(tileSize) as unknown as Graphics),
-        marsh: make('marsh', ()=> marshTexture(tileSize) as unknown as Graphics),
-        thicket: make('thicket', ()=> thicketTexture(tileSize) as unknown as Graphics),
-        water: make('water', ()=> waterTexture(tileSize) as unknown as Graphics),
-        road: make('road', ()=> roadTexture(tileSize) as unknown as Graphics),
-        bridge: make('bridge', ()=> bridgeTexture(tileSize) as unknown as Graphics),
-      };
-    }
+
+    const make = (gf: (size?: number) => Graphics) => {
+      const g = gf(tileSize);
+      const rt = RenderTexture.create({ width: tileSize, height: tileSize });
+      app.renderer.render(g, { renderTexture: rt });
+      g.destroy(true);
+      return rt as Texture;
+    };
+
+    texRef.current = {
+      meadow: make(grassG),
+      forest: make(forestG),
+      hill:   make(hillG),
+      marsh:  make(marshG),
+      thicket:make(thicketG),
+      water:  make(waterG),
+      road:   make(roadG),
+      bridge: make(bridgeG),
+    };
   }, [tileSize]);
 
-  // redraw tiles when data changes
+  // redraw
   useEffect(() => {
     if (!appRef.current || !layersRef.current || !texRef.current) return;
     const { base, roads, structs, ghost: ghostL } = layersRef.current;
     const T = texRef.current!;
     base.removeChildren(); roads.removeChildren(); structs.removeChildren(); ghostL.removeChildren();
 
-    // base + roads
     for (let i=0;i<tiles.length;i++){
       const t = tiles[i];
       const x = (i % size) * tileSize, y = Math.floor(i/size) * tileSize;
@@ -144,7 +113,6 @@ useEffect(() => {
         const b = new Sprite(T.bridge); b.x = x; b.y = y; roads.addChild(b);
       }
 
-      // structures (simple vector icons; keep it minimal here)
       if (t.structure){
         const g = new Graphics(); g.roundRect(x+4, y+4, tileSize-8, tileSize-8, 4).fill(0x3b2f2f);
         if (t.structure.id.includes('market')) g.fill({ color: 0xc7772e });
@@ -156,7 +124,6 @@ useEffect(() => {
       }
     }
 
-    // ghost highlight
     if (ghost && ghost.length){
       ghost.forEach(i=>{
         const x = (i % size) * tileSize, y = Math.floor(i/size) * tileSize;

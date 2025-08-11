@@ -1,5 +1,4 @@
-// Cozy-fantasy procedural graphics (return Graphics, not Texture)
-import { Graphics } from 'pixi.js';
+import { Graphics } from "pixi.js";
 
 export type GFactory = (size?: number) => Graphics;
 
