@@ -28,17 +28,24 @@ type Building = {
 
 const GRID_SIZE = 54;
 const DEFAULT_RACK_SIZE = 8;
-const WORD_LIST_PATH = "/words-enable.txt"; // make sure this file exists in /public
-const FALLBACK: string[] = [
-  "STONE",
-  "MAGIC",
-  "GARDEN",
-  "BRIDGE",
-  "LIBRARY",
-  "RIVER",
-  "MARKET",
-  "COTTAGE",
-];
+const WORD_LIST_PATH = "/words-enable.txt"; // keep this near the top
+
+async function loadWords(): Promise<Set<string>> {
+  try {
+    const res = await fetch(WORD_LIST_PATH, { cache: "no-store" });
+    if (!res.ok) throw new Error("No words file");
+    const text = await res.text();
+    const words = text
+      .split(/\r?\n/)
+      .map(w => w.trim().toUpperCase())
+      .filter(w => /^[A-Z]{3,}$/.test(w));
+    return new Set(words);
+  } catch {
+    // inline fallback so there is no global name to go missing
+    return new Set(["STONE","MAGIC","GARDEN","BRIDGE","LIBRARY","RIVER","MARKET","COTTAGE"]);
+  }
+}
+
 
 const VOWELS = new Set(["A", "E", "I", "O", "U"]);
 
@@ -192,7 +199,9 @@ export default function App() {
   const [grid] = useState<Tile[]>(() => generateTerrain(GRID_SIZE, new Date().toISOString()));
   const [rack, setRack] = useState<string[]>(() => generateRack(DEFAULT_RACK_SIZE));
   const [typed, setTyped] = useState("");
-  const [dict, setDict] = useState<Set<string>>(new Set(FALLBACK));
+ const [dict, setDict] = useState<Set<string>>(
+  new Set(["STONE","MAGIC","GARDEN","BRIDGE","LIBRARY","RIVER","MARKET","COTTAGE"])
+);
   const [msg, setMsg] = useState("Cozy build: drag to pan, wheel to zoom. Build roads/bridges first!");
   const [res, setRes] = useState<Resources>({ coin: 0, lumber: 0, stone: 0, knowledge: 0, magic: 0 });
   const [happiness] = useState(80);
