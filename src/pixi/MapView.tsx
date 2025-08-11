@@ -142,7 +142,7 @@ export default function MapView({
           const g = gf(tileSize);
           const rt = RenderTexture.create({ width: tileSize, height: tileSize });
           // v8: use `target`, not `renderTexture`
-          app!.renderer.render({ container: g, target: rt, clear: true });
+          app.renderer.render({ container: g, target: rt, clear: true });
           g.destroy(true);
           return rt as Texture;
         };
@@ -165,8 +165,8 @@ export default function MapView({
       const fit = () => {
         const w = host.clientWidth || 300;
         const h = host.clientHeight || 300;
-        (app!.renderer as any).resize?.({ width: w, height: h }) ??
-          (app!.renderer as any).resize?.(w, h);
+        (app.renderer as any).resize?.({ width: w, height: h }) ??
+          (app.renderer as any).resize?.(w, h);
       };
       fit();
       ro = new ResizeObserver(fit);
