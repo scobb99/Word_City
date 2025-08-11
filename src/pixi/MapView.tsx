@@ -77,7 +77,7 @@ export default function MapView({
       const world = new Container();
       world.eventMode = 'static';
 
-      // Ensure the interactive area covers the whole grid (reliable pointer hits)
+      // interactive area covers entire grid
       const gridW = size * tileSize;
       const gridH = size * tileSize;
       world.hitArea = new Rectangle(0, 0, gridW, gridH);
@@ -90,7 +90,7 @@ export default function MapView({
       world.addChild(base, roads, structs, ghostL);
       app.stage.addChild(world);
 
-      // ---- Pan & zoom
+      // Pan & zoom
       world.on('pointerdown', (e: any) => {
         dragging.current.down = true;
         dragging.current.lx = e.global.x;
@@ -119,7 +119,7 @@ export default function MapView({
         { passive: true }
       );
 
-      // ---- Click/drag to tiles
+      // Click/drag to tiles
       world.on('pointertap', (e: any) => {
         const p = world.toLocal(e.global);
         const x = Math.floor(p.x / tileSize);
@@ -136,12 +136,13 @@ export default function MapView({
 
       layersRef.current = { base, roads, structs, ghost: ghostL };
 
-      // ---- Build textures AFTER app exists (Pixi v8 render API)
+      // Build textures AFTER app exists (Pixi v8 render API)
       if (!texRef.current) {
         const make = (gf: (size?: number) => Graphics) => {
           const g = gf(tileSize);
           const rt = RenderTexture.create({ width: tileSize, height: tileSize });
-          app!.renderer.render({ container: g, renderTexture: rt }); // v8: single options object
+          // v8: use `target`, not `renderTexture`
+          app!.renderer.render({ container: g, target: rt, clear: true });
           g.destroy(true);
           return rt as Texture;
         };
@@ -160,7 +161,7 @@ export default function MapView({
         setReadyBump((v) => v + 1); // trigger draw effect
       }
 
-      // ---- Keep renderer size matched to host
+      // Keep renderer size matched to host
       const fit = () => {
         const w = host.clientWidth || 300;
         const h = host.clientHeight || 300;
