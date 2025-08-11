@@ -8,7 +8,7 @@ type Tile = { terrain: 'grass' | 'water' | 'road' | 'bridge'; biome: Biome; stru
 
 const VOWELS = new Set(["A","E","I","O","U"]);
 const DEFAULT_RACK_SIZE = 8;
-const WORD_LIST_PATH = "/words-enable.txt"; // <— put your big list here
+
 
 // ——— Minimal catalog to demonstrate; keep your full set if you want ———
 type Building = {
