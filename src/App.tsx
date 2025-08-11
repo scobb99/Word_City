@@ -204,9 +204,21 @@ export default function App(){
         </header>
 
         <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12 }}>
-          <div style={{ background:"rgba(30,41,59,.6)", border:"1px solid #334155", borderRadius:16, padding:8, overflow:"hidden" }}>
-            <MapView tiles={grid} size={GRID_SIZE} tileSize={28} ghost={null} onClick={onClickTile} onDrag={onDragTile}/>
-          </div>
+         <div
+  style={{
+    background: "rgba(30,41,59,.6)",
+    border: "1px solid #334155",
+    borderRadius: 16,
+    padding: 8,
+    overflow: "hidden",
+    height: "72vh"           // <- gives the map a visible, responsive height
+  }}
+>
+  <div style={{ width: "100%", height: "100%" }}>
+    <MapView tiles={grid} size={GRID_SIZE} tileSize={28} ghost={null} onClick={onClickTile} onDrag={onDragTile} />
+  </div>
+</div>
+
 
           <div style={{ display:"grid", gap:12 }}>
             <div style={{ background:"rgba(30,41,59,.6)", border:"1px solid #334155", borderRadius:16, padding:12 }}>

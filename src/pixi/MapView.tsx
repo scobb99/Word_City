@@ -7,8 +7,8 @@ type Tile = { terrain: 'grass'|'water'|'road'|'bridge'; biome: Biome; structure?
 
 type Props = {
   tiles: Tile[];
-  size: number;
-  tileSize?: number;
+  size: number;            // grid dimension (e.g., 54)
+  tileSize?: number;       // pixel size of a tile (world scale), e.g., 28
   ghost?: number[]|null;
   onClick?(idx:number): void;
   onDrag?(idx:number): void;
@@ -21,26 +21,25 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
   const texRef = useRef<{[k:string]:Texture}|null>(null);
   const dragging = useRef<{down:boolean; lx:number; ly:number}>({ down:false, lx:0, ly:0 });
 
-  // mount app (Pixi v8 style)
+  // mount app (Pixi v8) and keep canvas sized to host
   useEffect(() => {
     let app: Application | null = null;
     let cancelled = false;
+    let ro: ResizeObserver | null = null;
 
     (async () => {
       const host = hostRef.current!;
-      // v8: construct, then init
       app = new Application();
       await app.init({
         backgroundAlpha: 0,
         antialias: true,
-        width: size * tileSize + 2,
-        height: size * tileSize + 2,
+        // start with something; we immediately resize to host below
+        width: 300, height: 300,
       });
       if (cancelled) { app.destroy(true); return; }
 
       appRef.current = app;
       host.innerHTML = '';
-      // v8: use canvas (not view)
       host.appendChild(app.canvas);
 
       const world = new Container(); world.eventMode = 'static';
@@ -48,10 +47,11 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
       world.addChild(base, roads, structs, ghostL);
       app.stage.addChild(world);
 
+      // ----- pan & zoom -----
       let scale = 1;
       world.on('pointerdown', (e:any) => { dragging.current.down = true; dragging.current.lx = e.global.x; dragging.current.ly = e.global.y; });
-      world.on('pointerup',   ()    => { dragging.current.down = false; });
-      world.on('pointerupoutside',  () => { dragging.current.down = false; });
+      world.on('pointerup',   () => { dragging.current.down = false; });
+      world.on('pointerupoutside', () => { dragging.current.down = false; });
       world.on('globalpointermove', (e:any) => {
         if (!dragging.current.down) return;
         const dx = e.global.x - dragging.current.lx;
@@ -59,14 +59,13 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
         world.x += dx; world.y += dy;
         dragging.current.lx = e.global.x; dragging.current.ly = e.global.y;
       });
-
-      // attach wheel to the canvas
       app.canvas.addEventListener('wheel', (ev: WheelEvent) => {
         const delta = Math.sign(ev.deltaY) * -0.1;
         scale = Math.min(2.5, Math.max(0.5, scale + delta));
         world.scale.set(scale);
       }, { passive: true });
 
+      // clicks -> tile index
       world.on('pointertap', (e:any) => {
         const p = world.toLocal(e.global);
         const x = Math.floor(p.x / tileSize), y = Math.floor(p.y / tileSize);
@@ -80,10 +79,22 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
       });
 
       layersRef.current = { base, roads, structs, ghost: ghostL };
+
+      // ----- keep renderer the same size as the host div -----
+      const fit = () => {
+        const w = host.clientWidth || 300;
+        const h = host.clientHeight || 300;
+        // v8 resize signature
+        (app!.renderer as any).resize?.({ width: w, height: h }) ?? (app!.renderer as any).resize?.(w, h);
+      };
+      fit();
+      ro = new ResizeObserver(fit);
+      ro.observe(host);
     })();
 
     return () => {
       cancelled = true;
+      ro?.disconnect();
       appRef.current?.destroy(true);
       appRef.current = null;
       layersRef.current = null;
@@ -116,7 +127,7 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
     };
   }, [tileSize]);
 
-  // redraw
+  // redraw contents whenever tiles change
   useEffect(() => {
     if (!appRef.current || !layersRef.current || !texRef.current) return;
     const { base, roads, structs, ghost: ghostL } = layersRef.current;
@@ -126,20 +137,17 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
     for (let i=0;i<tiles.length;i++){
       const t = tiles[i];
       const x = (i % size) * tileSize, y = Math.floor(i/size) * tileSize;
+
       const biomeTex = T[t.biome] || T.meadow;
       const s = new Sprite(biomeTex); s.x = x; s.y = y; base.addChild(s);
 
-      if (t.terrain === 'water') {
-        const w = new Sprite(T.water); w.x = x; w.y = y; base.addChild(w);
-      } else if (t.terrain === 'road') {
-        const r = new Sprite(T.road); r.x = x; r.y = y; roads.addChild(r);
-      } else if (t.terrain === 'bridge') {
-        const b = new Sprite(T.bridge); b.x = x; b.y = y; roads.addChild(b);
-      }
+      if (t.terrain === 'water')      { const w = new Sprite(T.water);  w.x=x; w.y=y; base.addChild(w); }
+      else if (t.terrain === 'road')  { const r = new Sprite(T.road);   r.x=x; r.y=y; roads.addChild(r); }
+      else if (t.terrain === 'bridge'){ const b = new Sprite(T.bridge); b.x=x; b.y=y; roads.addChild(b); }
 
       if (t.structure){
-        const g = new Graphics(); g.roundRect(x+4, y+4, tileSize-8, tileSize-8, 4).fill(0x3b2f2f);
-        if (t.structure.id.includes('market')) g.fill({ color: 0xc7772e });
+        const g = new Graphics().roundRect(x+4, y+4, tileSize-8, tileSize-8, 4).fill(0x3b2f2f);
+        if (t.structure.id.includes('market'))  g.fill({ color: 0xc7772e });
         if (t.structure.id.includes('library')) g.fill({ color: 0x6a7bb6 });
         if (t.structure.id.includes('cottage')) g.fill({ color: 0xcf8c7c });
         if (t.structure.id.includes('quarry'))  g.fill({ color: 0x8f8f8f });
@@ -151,11 +159,12 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
     if (ghost && ghost.length){
       ghost.forEach(i=>{
         const x = (i % size) * tileSize, y = Math.floor(i/size) * tileSize;
-        const g = new Graphics(); g.roundRect(x+1,y+1,tileSize-2,tileSize-2,6).fill({ color: 0x69d6a6, alpha: 0.25 }).stroke({ color: 0x69d6a6, width: 2, alpha: 0.4 });
+        const g = new Graphics().roundRect(x+1,y+1,tileSize-2,tileSize-2,6).fill({ color: 0x69d6a6, alpha: 0.25 }).stroke({ color: 0x69d6a6, width: 2, alpha: 0.4 });
         ghostL.addChild(g);
       });
     }
   }, [tiles, size, tileSize, ghost]);
 
-  return <div ref={hostRef} style={{ width: size*tileSize+2, height: size*tileSize+2 }} />;
+  // host fills its parent; parent sets the height
+  return <div ref={hostRef} style={{ width: '100%', height: '100%' }} />;
 }
