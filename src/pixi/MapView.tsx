@@ -21,7 +21,6 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
   const texRef = useRef<{[k:string]:Texture}|null>(null);
   const dragging = useRef<{down:boolean; lx:number; ly:number}>({ down:false, lx:0, ly:0 });
 
-  // mount app
   useEffect(() => {
     const host = hostRef.current!;
     const app = new Application({ backgroundAlpha: 0, antialias: true, width: size*tileSize+2, height: size*tileSize+2 });
@@ -67,7 +66,6 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
     return () => { app.destroy(true); appRef.current = null; };
   }, [size, tileSize, onClick, onDrag]);
 
-  // build textures once from Graphics factories
   useEffect(() => {
     if (!appRef.current || texRef.current) return;
     const app = appRef.current;
@@ -92,7 +90,6 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
     };
   }, [tileSize]);
 
-  // redraw
   useEffect(() => {
     if (!appRef.current || !layersRef.current || !texRef.current) return;
     const { base, roads, structs, ghost: ghostL } = layersRef.current;
