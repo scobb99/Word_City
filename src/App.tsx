@@ -5,14 +5,23 @@ import MapView from "./pixi/MapView";
 
 type Resources = { coin: number; lumber: number; stone: number; knowledge: number; magic: number };
 type Biome = "meadow" | "forest" | "hill" | "marsh" | "thicket";
+type Structure = {
+  id: string;
+  level: number;
+  icon: string;
+  w: number;
+  h: number;
+  anchor: boolean;      // only true on the top-left tile of the footprint
+  origin: number;       // index of the top-left tile (so we can remove the whole bldg from any tile)
+};
 type Tile = {
   terrain: "grass" | "water" | "road" | "bridge";
   biome: Biome;
-  structure?: { id: string; level: number; icon: string; shape?: Array<[number, number]> };
+  structure?: Structure;
 };
 type Building = {
   id: string; name: string; icon: string; tier: 1 | 2 | 3;
-  w: number; h: number; shape?: Array<[number, number]>;
+  w: number; h: number;
   cost: Partial<Resources>; happiness?: number; housing?: number;
 };
 
@@ -51,7 +60,8 @@ function generateTerrain(size:number, seedStr:string): Tile[] {
         const xx=x+dx,yy=y+dy; if(xx>=0&&yy>=0&&xx<size&&yy<size) tiles[xyToIdx(xx,yy,size)].terrain="water";
       }
     }
-    y += [-1,0,1][Math.floor(rnd()*3)]; y = Math.max(1, Math.min(size-2, y));
+    y += [-1,0,1][Math.floor(rnd()*3)];
+    y = Math.max(1, Math.min(size-2, y));
   }
   // Biome patches
   const patch=(type:Biome,attempts:number,radius:number,prob=0.8)=>{
@@ -83,6 +93,14 @@ function canFormFromRack(word:string, rack:string[]){ const need=countChars(word
 function weightedRandomLetter(){ const bag="EEEEEEEEETTAAOOIINNSHHRRDDLCCUMWFGYPBVKJXZQ"; return bag[Math.floor(Math.random()*bag.length)]||"E"; }
 function generateRack(n:number){ const r:string[]=[]; while(r.length<n) r.push(weightedRandomLetter()); return r; }
 
+/* Resources helpers */
+function canAfford(res:Resources, cost:Partial<Resources>){ for (const k of Object.keys(cost) as (keyof Resources)[]) if ((res[k]||0) < (cost[k]||0)) return false; return true; }
+function pay(res:Resources, cost:Partial<Resources>):Resources {
+  const out = { ...res };
+  (Object.keys(cost) as (keyof Resources)[]).forEach(k=> out[k] = Math.max(0, out[k] - (cost[k]||0)));
+  return out;
+}
+
 /* Load dictionary (no FALLBACK symbol anywhere) */
 async function loadWords(): Promise<Set<string>> {
   try {
@@ -104,7 +122,7 @@ export default function App(){
   const [rack, setRack] = useState<string[]>(()=> generateRack(DEFAULT_RACK_SIZE));
   const [typed, setTyped] = useState("");
   const [dict, setDict] = useState<Set<string>>(new Set(["STONE","MAGIC","GARDEN","BRIDGE","LIBRARY","RIVER","MARKET","COTTAGE"]));
-  const [msg, setMsg] = useState("Cozy build: pan (drag), zoom (wheel). Place roads/bridges, then buildings.");
+  const [msg, setMsg] = useState("Cozy build: pan (drag), zoom (wheel). Roads first; build on land next to a road.");
   const [res, setRes] = useState<Resources>({ coin:0, lumber:0, stone:0, knowledge:0, magic:0 });
   const [happiness] = useState(80);
   const [tier] = useState<1|2|3>(1);
@@ -121,7 +139,18 @@ export default function App(){
       const next = g.slice();
       if (removeMode){
         if (t.terrain==="road"||t.terrain==="bridge") next[i] = { ...t, terrain:"grass" };
-        else if (t.structure) next[i] = { ...t, structure: undefined };
+        else if (t.structure){
+          // remove whole building by origin
+          const origin = t.structure.origin;
+          const { x:ox, y:oy } = idxToXY(origin, GRID_SIZE);
+          for (let dx=0; dx<t.structure.w; dx++){
+            for (let dy=0; dy<t.structure.h; dy++){
+              const ii = xyToIdx(ox+dx, oy+dy, GRID_SIZE);
+              const tt = next[ii];
+              if (tt?.structure && tt.structure.origin === origin) next[ii] = { ...tt, structure: undefined };
+            }
+          }
+        }
         return next;
       }
       if (t.terrain==="water"){
@@ -136,28 +165,63 @@ export default function App(){
     });
   }
 
+  /* Require building on land adjacent to road/bridge; enforce costs */
   function onClickTile(i:number){
     if (selected && (selected as any).id==="__road__") return placeRoadOrBridge(i);
     if (!selected) return;
+
     const b = selected as Building;
     const {x,y} = idxToXY(i, GRID_SIZE);
-    const footprint = b.shape ?? Array.from({length:b.w*b.h},(_,k)=> [k%b.w, Math.floor(k/b.w)] as [number,number]);
-    // Validate footprint
-    for (const [dx,dy] of footprint){
-      const xx=x+dx, yy=y+dy; if(xx<0||yy<0||xx>=GRID_SIZE||yy>=GRID_SIZE){ setMsg("Out of bounds."); return; }
-      const ii=xyToIdx(xx,yy,GRID_SIZE); const tt=grid[ii];
-      if (!tt || !((tt.terrain==="road"||tt.terrain==="bridge") && !tt.structure)){ setMsg("Needs empty road/bridge tiles."); return; }
+
+    // Validate rectangular footprint on land (no roads/bridges/water; empty)
+    for (let dx=0; dx<b.w; dx++){
+      for (let dy=0; dy<b.h; dy++){
+        const xx=x+dx, yy=y+dy;
+        if(xx<0||yy<0||xx>=GRID_SIZE||yy>=GRID_SIZE){ setMsg("Out of bounds."); return; }
+        const ii=xyToIdx(xx,yy,GRID_SIZE); const tt=grid[ii];
+        if (!tt) { setMsg("Out of bounds."); return; }
+        if (tt.terrain==="water" || tt.terrain==="road" || tt.terrain==="bridge"){ setMsg("Place buildings on land, next to roads."); return; }
+        if (tt.structure){ setMsg("Space occupied."); return; }
+      }
     }
-    // Place
+
+    // Must touch a road/bridge on any edge of the footprint
+    const touchesRoad = (() => {
+      for (let dx=0; dx<b.w; dx++){
+        for (let dy=0; dy<b.h; dy++){
+          const xx=x+dx, yy=y+dy;
+          const neighbors = [[1,0],[-1,0],[0,1],[0,-1]];
+          for (const [nx,ny] of neighbors){
+            const tx=xx+nx, ty=yy+ny;
+            if (tx<0||ty<0||tx>=GRID_SIZE||ty>=GRID_SIZE) continue;
+            const n = grid[xyToIdx(tx,ty,GRID_SIZE)];
+            if (n && (n.terrain==="road" || n.terrain==="bridge")) return true;
+          }
+        }
+      }
+      return false;
+    })();
+    if (!touchesRoad){ setMsg("Buildings must touch a road/bridge."); return; }
+
+    // Enforce cost
+    if (!canAfford(res, b.cost)){ setMsg("Not enough resources."); return; }
+
+    // Place + pay
     setGrid(g=>{
       const next=g.slice();
-      for (const [dx,dy] of footprint){
-        const ii=xyToIdx(x+dx,y+dy,GRID_SIZE);
-        next[ii] = { ...next[ii], structure:{ id:b.id, level:1, icon:b.icon, shape:b.shape } };
+      const origin = xyToIdx(x,y,GRID_SIZE);
+      for (let dx=0; dx<b.w; dx++){
+        for (let dy=0; dy<b.h; dy++){
+          const ii=xyToIdx(x+dx,y+dy,GRID_SIZE);
+          next[ii] = { ...next[ii], structure:{
+            id:b.id, level:1, icon:b.icon, w:b.w, h:b.h, anchor: (dx===0 && dy===0), origin
+          }};
+        }
       }
       return next;
     });
-    setMsg(`${b.name} built`);
+    setRes(r=> pay(r, b.cost));
+    setMsg(`${b.name} built (-${b.cost.coin||0}c, -${b.cost.lumber||0}l, -${b.cost.stone||0}s)`);
   }
 
   function onDragTile(i:number){
@@ -204,22 +268,24 @@ export default function App(){
         </header>
 
         <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12 }}>
-         <div
-  style={{
-    background: "rgba(30,41,59,.6)",
-    border: "1px solid #334155",
-    borderRadius: 16,
-    padding: 8,
-    overflow: "hidden",
-    height: "72vh"           // <- gives the map a visible, responsive height
-  }}
->
-  <div style={{ width: "100%", height: "100%" }}>
-    <MapView tiles={grid} size={GRID_SIZE} tileSize={28} ghost={null} onClick={onClickTile} onDrag={onDragTile} />
-  </div>
-</div>
+          {/* MAP PANEL */}
+          <div
+            style={{
+              background: "rgba(30,41,59,.6)",
+              border: "1px solid #334155",
+              borderRadius: 16,
+              padding: 8,
+              overflow: "hidden",
+              height: "72vh",
+              contain: "layout paint size", // helps prevent flicker from layout changes
+            }}
+          >
+            <div style={{ width: "100%", height: "100%" }}>
+              <MapView tiles={grid} size={GRID_SIZE} tileSize={28} ghost={null} onClick={onClickTile} onDrag={onDragTile} />
+            </div>
+          </div>
 
-
+          {/* UI PANEL */}
           <div style={{ display:"grid", gap:12 }}>
             <div style={{ background:"rgba(30,41,59,.6)", border:"1px solid #334155", borderRadius:16, padding:12 }}>
               <div style={{ marginBottom:8, opacity:0.85, fontSize:14 }}>{msg}</div>
@@ -253,6 +319,9 @@ export default function App(){
                   }}>
                     <div style={{ fontWeight:600 }}>{b.name}</div>
                     <div style={{ fontSize:11, opacity:0.75 }}>T{b.tier} • {b.w}×{b.h}</div>
+                    <div style={{ fontSize:11, opacity:0.6 }}>
+                      Cost: {b.cost.coin||0}c {b.cost.lumber||0}l {b.cost.stone||0}s
+                    </div>
                   </button>
                 ))}
               </div>
@@ -261,7 +330,7 @@ export default function App(){
         </div>
 
         <footer style={{ textAlign:"center", fontSize:11, opacity:0.6, marginTop:10 }}>
-          Painterly tiles • Roads/Bridges • Word→resources • Open dictionary (with inline fallback)
+          Painterly tiles • Roads/Bridges • Word→resources • Road-adjacent buildings • Costs enforced
         </footer>
       </div>
     </div>

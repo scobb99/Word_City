@@ -11,11 +11,8 @@ import {
 import { grassG, forestG, hillG, marshG, thicketG, waterG, roadG, bridgeG } from './textures';
 
 type Biome = 'meadow' | 'forest' | 'hill' | 'marsh' | 'thicket';
-type Tile = {
-  terrain: 'grass' | 'water' | 'road' | 'bridge';
-  biome: Biome;
-  structure?: { id: string; level: number; icon: string; shape?: Array<[number, number]> };
-};
+type Structure = { id: string; level: number; icon: string; w: number; h: number; anchor: boolean; origin: number };
+type Tile = { terrain: 'grass'|'water'|'road'|'bridge'; biome: Biome; structure?: Structure };
 
 type Props = {
   tiles: Tile[];
@@ -26,6 +23,69 @@ type Props = {
   onDrag?(idx: number): void;
 };
 
+/* Simple cozy-fantasy building painter */
+function paintBuilding(id:string, wpx:number, hpx:number): Graphics {
+  const g = new Graphics();
+  // Base body
+  const body = 0x3b2f2f;
+  const stroke = 0x1e1b1b;
+  g.roundRect(2, 6, wpx-4, hpx-8, 6).fill(body).stroke({ color: stroke, width: 2, alpha: 0.5 });
+
+  const roof = (c:number)=> g.poly([2,6, wpx-2,6, wpx-8,0, 8,0]).fill(c);
+  const stripe = (x:number,w:number,c:number)=> g.rect(x, 6, w, 10).fill(c);
+  const windowRect = (x:number,y:number)=> g.roundRect(x,y,8,10,2).fill(0xe6f0ff).stroke({color:0x2a2a2a, width:1, alpha:0.6});
+  const post = (x:number)=> g.rect(x, hpx-10, 4, 10).fill(0x6b4e31);
+
+  switch(id){
+    case 'cottage':
+      roof(0xb56539);
+      windowRect(10, Math.max(12, hpx/2 - 6));
+      windowRect(Math.max(20, wpx-20), Math.max(12, hpx/2 - 6));
+      break;
+    case 'sawmill':
+      roof(0x8b5a2b);
+      // saw blade
+      g.circle(wpx*0.7, hpx*0.6, 8).fill(0xdddddd).stroke({ color:0x666666, width:2 });
+      // planks
+      for (let x=10; x<wpx-10; x+=8) g.rect(x, hpx-18, 6, 10).fill(0x7a5a3c);
+      break;
+    case 'quarry':
+      roof(0x707070);
+      // stone chunks
+      for (let i=0;i<6;i++){
+        const rx = 8 + Math.random()*(wpx-24);
+        const ry = 12 + Math.random()*(hpx-28);
+        g.roundRect(rx, ry, 10, 8, 2).fill(0x9a9a9a).stroke({ color:0x5a5a5a, width:1, alpha:0.6 });
+      }
+      break;
+    case 'market':
+      // striped awning
+      const cols = [0xf4a261, 0xfef3c7];
+      const stripeW = Math.max(10, Math.floor(wpx/6));
+      for (let x=2, i=0; x<wpx-2; x+=stripeW, i++){
+        stripe(x, Math.min(stripeW, wpx-2-x), cols[i%2]);
+      }
+      g.roundRect(2, 18, wpx-4, hpx-20, 4).fill(0x8b3f2b);
+      break;
+    case 'library':
+      roof(0x6a7bb6);
+      // columns
+      const colW = 6, gap = 10; let cx = 10;
+      for (; cx < wpx-10-colW; cx += gap) g.roundRect(cx, 14, colW, hpx-22, 2).fill(0xdedede);
+      // door
+      g.roundRect(Math.max(10, wpx/2-6), hpx-24, 12, 20, 3).fill(0x333333);
+      break;
+    case 'pier':
+      // deck
+      g.roundRect(0, hpx*0.25, wpx, hpx*0.5, 4).fill(0x8b6b4a);
+      post(6); post(wpx-10);
+      break;
+    default:
+      roof(0x8b5a2b);
+  }
+  return g;
+}
+
 export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, onDrag }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
@@ -34,8 +94,9 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
   const dragging = useRef<{ down: boolean; lx: number; ly: number }>({ down: false, lx: 0, ly: 0 });
   const [readyBump, setReadyBump] = useState(0); // triggers redraw after textures build
 
-  // Mount & init (Pixi v8) with WebGL + auto-resize to host
+  // Mount & init (Pixi v8) with WebGL + manual resize (stable)
   useEffect(() => {
+    let ro: ResizeObserver | null = null;
     let cancelled = false;
 
     (async () => {
@@ -46,27 +107,21 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
       await app.init({
         backgroundAlpha: 0,
         antialias: true,
-        preference: 'webgl',                 // <- force WebGL (avoid WebGPU flicker/black)
-        resizeTo: host,                      // <- keep canvas sized to this div
-        autoDensity: true,
-        resolution: Math.min(window.devicePixelRatio || 1, 2),
+        preference: 'webgl',     // stay on WebGL to avoid GPU flicker on some Macs
         width: 300,
         height: 300,
+        autoDensity: true,
+        resolution: Math.min(window.devicePixelRatio || 1, 2),
       });
       if (cancelled) { app.destroy(true); return; }
 
       appRef.current = app;
       host.innerHTML = '';
       host.appendChild(app.canvas);
-      console.log('MapView v8 (webgl) ready');
+      console.log('MapView v8 (webgl) stable');
 
       const world = new Container();
       world.eventMode = 'static';
-
-      // Make the interactive surface cover the whole grid
-      const gridW = size * tileSize;
-      const gridH = size * tileSize;
-      world.hitArea = new Rectangle(0, 0, gridW, gridH);
 
       const base = new Container();
       const roads = new Container();
@@ -74,6 +129,11 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
       const ghostL = new Container();
       world.addChild(base, roads, structs, ghostL);
       app.stage.addChild(world);
+
+      // hit area covers whole grid for reliable pointer hits
+      const gridW = size * tileSize;
+      const gridH = size * tileSize;
+      world.hitArea = new Rectangle(0, 0, gridW, gridH);
 
       // ---- Pan & zoom
       world.on('pointerdown', (e: any) => { dragging.current.down = true; dragging.current.lx = e.global.x; dragging.current.ly = e.global.y; });
@@ -116,11 +176,9 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
           const rt = RenderTexture.create({
             width: tileSize,
             height: tileSize,
-            // keep the same resolution as the renderer to avoid blurry tiles
-            // @ts-ignore (property exists at runtime)
+            // @ts-ignore: resolution exists at runtime
             resolution: (app.renderer as any).resolution || 1,
           });
-          // v8: use `target`, not `renderTexture`
           app.renderer.render({ container: g, target: rt, clear: true });
           g.destroy(true);
           return rt as Texture;
@@ -139,10 +197,21 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
 
         setReadyBump(v => v + 1); // trigger draw effect
       }
+
+      // ---- Manual resize only when the host actually changes size (avoids flicker)
+      const fit = () => {
+        const w = host.clientWidth || 300;
+        const h = host.clientHeight || 300;
+        const r: any = app.renderer as any;
+        try { r.resize({ width: w, height: h }); } catch { r.resize(w, h); }
+      };
+      fit();
+      ro = new ResizeObserver(fit);
+      ro.observe(host);
     })();
 
     return () => {
-      cancelled = true;
+      ro?.disconnect();
       if (appRef.current) appRef.current.destroy(true);
       appRef.current = null;
       layersRef.current = null;
@@ -165,27 +234,31 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
       const x = (i % size) * tileSize;
       const y = Math.floor(i / size) * tileSize;
 
+      // biome tile
       const bg = new Sprite(T[t.biome] || T.meadow);
       bg.x = x; bg.y = y; base.addChild(bg);
 
+      // overlays
       if (t.terrain === 'water')      { const w = new Sprite(T.water);  w.x=x; w.y=y; base.addChild(w); }
       else if (t.terrain === 'road')  { const r = new Sprite(T.road);   r.x=x; r.y=y; roads.addChild(r); }
       else if (t.terrain === 'bridge'){ const b = new Sprite(T.bridge); b.x=x; b.y=y; roads.addChild(b); }
+    }
 
-      if (t.structure) {
-        const g = new Graphics().roundRect(x+4, y+4, tileSize-8, tileSize-8, 4).fill(0x3b2f2f);
-        if (t.structure.id.includes('market'))  g.fill({ color: 0xc7772e });
-        if (t.structure.id.includes('library')) g.fill({ color: 0x6a7bb6 });
-        if (t.structure.id.includes('cottage')) g.fill({ color: 0xcf8c7c });
-        if (t.structure.id.includes('quarry'))  g.fill({ color: 0x8f8f8f });
-        if (t.structure.id.includes('sawmill')) g.fill({ color: 0x8f6b4a });
-        structs.addChild(g);
-      }
+    // Draw buildings once from their anchor tile as a single piece
+    for (let i = 0; i < tiles.length; i++){
+      const t = tiles[i]; if (!t.structure || !t.structure.anchor) continue;
+      const x = (i % size) * tileSize;
+      const y = Math.floor(i / size) * tileSize;
+      const wpx = t.structure.w * tileSize;
+      const hpx = t.structure.h * tileSize;
+      const b = paintBuilding(t.structure.id, wpx, hpx);
+      b.position.set(x, y);
+      layers.structs.addChild(b);
     }
 
     if (ghost && ghost.length) {
-      ghost.forEach((i) => {
-        const x = (i % size) * tileSize, y = Math.floor(i / size) * tileSize;
+      ghost.forEach((ii) => {
+        const x = (ii % size) * tileSize, y = Math.floor(ii / size) * tileSize;
         const g = new Graphics()
           .roundRect(x + 1, y + 1, tileSize - 2, tileSize - 2, 6)
           .fill({ color: 0x69d6a6, alpha: 0.25 })
@@ -195,6 +268,6 @@ export default function MapView({ tiles, size, tileSize = 28, ghost, onClick, on
     }
   }, [tiles, size, tileSize, ghost, readyBump]);
 
-  // Host fills its parent; parent controls height in App.tsx
+  // Host fills its parent; parent height is set in App.tsx
   return <div ref={hostRef} style={{ width: '100%', height: '100%' }} />;
 }
